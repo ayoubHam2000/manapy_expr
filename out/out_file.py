@@ -27,7 +27,7 @@ class AdvectionDiffusionSolver():
                     ('cfl', float, .4, 0,
                      'cfl of the explicit scheme')
     ]
-    Hello
+    Wow Backend is numba
     @classmethod
     def process_conf(cls, conf, kwargs):
         """                                                                                                                                                                                                
