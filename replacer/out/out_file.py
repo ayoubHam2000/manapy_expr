@@ -27,7 +27,9 @@ class AdvectionDiffusionSolver():
                     ('cfl', float, .4, 0,
                      'cfl of the explicit scheme')
     ]
-    Wow Backend is numba
+    Backend is numba device is cpu equations
+equation delta.u + v = 0 order => 1 dimension => 2
+
     @classmethod
     def process_conf(cls, conf, kwargs):
         """                                                                                                                                                                                                
