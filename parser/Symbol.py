@@ -1,6 +1,24 @@
 from Node import Node
+import re
 
 class Symbol():
+  symbolsDic = {}
+
+  @staticmethod
+  def symbols(s : str):
+    res = []
+    pattern = r'^[a-zA-Z ]*$'
+    valid = bool(re.match(pattern, s))
+    if not valid:
+      raise RuntimeError("invalid input")
+    tokens = s.split(' ')
+    for t in tokens:
+      if t not in Symbol.symbolsDic:
+        Symbol.symbolsDic[t] = Symbol(t).node
+      v = Symbol(Symbol.symbolsDic[t])
+      res.append(v)
+    return tuple(res)
+
   def __init__(self, value, name : str = None):
     if not (isinstance(value, (str, int, float, Node))):
       raise TypeError("Type error expect str, int, or float")
@@ -9,7 +27,10 @@ class Symbol():
     if isinstance(value, Node):
       self.node = value
     else:
-      self.node = Node(value, name)
+      if isinstance(value, str) and value in Symbol.symbolsDic:
+        self.node = Symbol.symbolsDic[value]
+      else:
+        self.node = Node(value, name)
   
   def laplace(self):
     return Symbol(self.node.laplace())
@@ -35,8 +56,11 @@ class Symbol():
   def exec(self):
     return self.node.exec()
   
-  def reduce(self):
-    return Symbol(self.node.reduce())
+  def reduce(self, dim):
+    return Symbol(self.node.reduce(dim))
+  
+  def getInfo(self, dim):
+    return self.node.getInfo(dim)
 
   def __mul__(self, x):
     if not isinstance(x, Symbol):
@@ -61,7 +85,7 @@ class Symbol():
     return str(self.node)
   
   def __repr__(self):
-    return str(self.node.token.name + "5")
+    return str(self.node.token.name)
 
 
 def grad(s : Symbol):

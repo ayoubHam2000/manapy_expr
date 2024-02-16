@@ -3,6 +3,7 @@ from Variable import Variable
 from Operation import Operation
 from collections import deque
 from Simplifier import simplify_tree
+from EquationInfo import EquationInfo
 
 class Node():
 
@@ -104,12 +105,42 @@ class Node():
         return res
     return [[self]]
   
+  def getInfo(self, dim):
+    res = EquationInfo()
+    if dim == 1 or dim == 2:
+      arr = self.expand()
+      for add in arr:
+        for mul in add:
+          if isinstance(mul.token, Variable):
+            res.variables.add(mul)
+          elif isinstance(mul.token, Operation):
+            op = mul.token
+            res.order = max(op.order, res.order)
+            if op.type == Operation.Grad:
+              res.hasGrad = True
+              res.gradVar.add(mul.left)
+            if op.type == Operation.Laplace:
+              res.hasLaplace = True
+              res.order = 2
+              res.laplaceVar.add(mul.left)
+            if op.type == Operation.Dz and dim == 1:
+              raise RuntimeError("Equation of order 1 can't have dz operation")
+            res.variables.add(mul.left)
+    return res
+
   """
     Return a simplified expression without factorization.
   """
-  def reduce(self):
-    return simplify_tree(self)
+  def reduce(self, dim):
+    return simplify_tree(self, dim)
 
+  """
+   - if x = 1 or self.token = 1 constant, just return the node Ex: 1 * a = a, a * 1 = a, 1 * 1 = 1
+   - 1/Avoid multiplication between operations such as (dx * dx), (dy * dx), or (dy * grad)
+    - grad * grad | grad * laplace | laplace * laplace => possible for the same variable
+   - 2/Prevent multiplication between variables and operations involving variables, such as dx(u) * v
+   - 3/Avoid multiplication between different variables, such as v * u
+  """
   def __mul__(self, x):
     if not isinstance(x, Node):
       x = Node(x)
@@ -117,6 +148,29 @@ class Node():
       return self
     if isinstance(self.token, Constant) and self.token.value == 1:
       return x
+    
+    #####
+    var1 = self
+    if isinstance(self.token, Operation):
+      var1 = self.left
+    var2 = x
+    if isinstance(x.token, Operation):
+      var2 = x.left
+    if var1 != var2 and isinstance(var1, Variable) and isinstance(var2, isinstance(var1, Variable)):
+      raise RuntimeError("multiplication of different variables")
+    
+    ######
+    if isinstance(self.token, Operation) and isinstance(x.token, Operation):
+      not_allowed = [Operation.Dx, Operation.Dy, Operation.Dz, Operation.Dt]
+      if self.token.type in not_allowed or x.token.type in not_allowed:
+        raise RuntimeError("can't do multiplication between partial operations")
+    
+    #####
+    if isinstance(self.token, Operation) and isinstance(x.token, Variable) or \
+      isinstance(self.token, Variable) and isinstance(x.token, Operation) or \
+      isinstance(self.token, Variable) and isinstance(x.token, Variable):
+      raise RuntimeError("can't do multiplication between variables or operation of variable")
+
     res = Node(Operation(Operation.Mul))
     res.left = self
     res.right = x
