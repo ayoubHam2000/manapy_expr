@@ -118,6 +118,8 @@ class Node():
     for add in arr:
       addArr.append(Node.mulArrFun(add))
     return Node.addArrFun(addArr)
+  
+
 
   """
     self : is the content inside the operation
@@ -193,7 +195,7 @@ class Node():
   """
   
   """
-  def decompose(self):
+  def __decompose(self):
     arr = self.expand()
     operations = {
       Operation.Grad : lambda x : x.grad(),
@@ -205,12 +207,17 @@ class Node():
         allowed = [Operation.Grad, Operation.Laplace, Operation.Div]
         if isinstance(mul.token, Operation) and mul.token.type in allowed:
           target = mul.left
-          target = target.decompose()
+          target = target.__decompose()
           expanded = target.linear_operator_decomposition(operations[mul.token.type])
           if mul.token.type == Operation.Grad:
             expanded = expanded.apply_gradient_product_rule()
           add[i] = expanded
     return self.expand_tree(arr)
+  
+  def decompose(self):
+    res = self.__decompose()
+    res = res.expand()
+    return self.expand_tree(res)
 
   def getInfo(self, dim):
     res = EquationInfo()
