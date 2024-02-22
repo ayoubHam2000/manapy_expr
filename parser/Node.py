@@ -2,59 +2,39 @@ from Constant import Constant
 from Variable import Variable
 from Operation import Operation
 from collections import deque
-from Simplifier import simplify_tree
 from EquationInfo import EquationInfo
 
 class Node():
-
-  def __init__(self, value, name = None):
-    if isinstance(value, (int, float)):
-      if name == None:
-        name = str(round(value, 3))
-      value = Constant(name, value)
+  def __init__(self, value, is_constant = False):
+    if not isinstance(is_constant, bool):
+      raise TypeError("Type error is_constant must be of type bool")
     if isinstance(value, str):
-      value = Variable(value)
+      value = Variable(value) if is_constant == False else Constant(value)
     if not isinstance(value, (Operation, Variable, Constant)):
       raise TypeError(f"can't construct Node from {type(value)}")
     self.token = value
     self.right = None
     self.left = None
 
-  """
-    raise an error if we can't do any operations.
-    return  True to add a new node, to have the new node point to self node
-            False to alter self content
-  """
-  def __checkOperation(self, operation : Operation):
-    if isinstance(self.token, Variable) :
-      return False
-    if isinstance(self.token, Operation) :
-      if self.token.type == operation.type:
-        if self.token.type in [Operation.Laplace, Operation.Grad]:
-          raise RuntimeError("Laplace or Grad Can't be nested")
-        elif self.token.type in [Operation.Dt, Operation.Dx, Operation.Dy, Operation.Dz] \
-          and self.token.order > 1:
-          raise RuntimeError("Max order of a variable is 2")
-        self.token.augment_order()
-        return True
 
-    raise TypeError(f"operation can only perform on Variable type or Node with the same operation type")
+  def __checkOperation(self, operation : Operation):
+    return True
 
   def __addOperation(self, operation : Operation):
-    exist = self.__checkOperation(operation)
-    if not exist:
-      res = Node(operation)
-      res.left = self
-      res.right = None
-      return res
-    else:
-      return self
+    self.__checkOperation(operation)
+    res = Node(operation)
+    res.left = self
+    res.right = None
+    return res
 
   def laplace(self):
     return self.__addOperation(Operation(Operation.Laplace))
 
   def grad(self):
     return self.__addOperation(Operation(Operation.Grad))
+  
+  def divergence(self):
+    return self.__addOperation(Operation(Operation.Div))
 
   def dx(self):
     return self.__addOperation(Operation(Operation.Dx))
@@ -73,7 +53,7 @@ class Node():
       if self.token.type == Operation.Add:
         return f"{self.left.exec()} + {self.right.exec()}"
       elif self.token.type == Operation.Mul:
-        return f"({self.left.exec()}) * ({self.right.exec()})"
+        return f"({self.left.exec()})({self.right.exec()})"
       elif self.token.type == Operation.Dt:
         return f"Dt{self.token.order}({self.left.exec()})"
       elif self.token.type == Operation.Dx:
@@ -89,7 +69,31 @@ class Node():
     elif isinstance(self.token, (Variable, Constant)):
       return self.token.name
     return ""
-  
+
+  def as_string(self, color = 0):
+    arrColors = ['\033[31m', '\033[32m', '\033[33m', '\033[34m']
+    ENDC = '\033[0m'
+    arr = self.expand()
+    res = ""
+    for i, add in enumerate(arr):
+      for j, mul in enumerate(add):
+        if isinstance(mul.token, Operation):
+          clr = arrColors[color % len(arrColors)]
+          res += f"{mul.token.name}{clr}({ENDC}{mul.left.as_string(color + 1)}{clr}){ENDC}"
+        else :
+          res += mul.token.name
+        if j < len(add) - 1:
+          res += "."
+      if i < len(arr) - 1:
+        res += " + "
+    return res
+
+  """
+    return an array of array
+      the parent array represent adding
+      the nested array represent multiplication
+      ex : 2 * (a + b) -> 2 * a + 2 * b -> [[2, a], [2, b]]
+  """
   def expand(self):
     if isinstance(self.token, Operation):
       if self.token.type == Operation.Add:
@@ -104,7 +108,110 @@ class Node():
             res.append(z)
         return res
     return [[self]]
+
+  """
+    get the expanded tree from the result of expand method
+  """
+  @staticmethod
+  def expand_tree(arr):
+    addArr = []
+    for add in arr:
+      addArr.append(Node.mulArrFun(add))
+    return Node.addArrFun(addArr)
+
+  """
+    self : is the content inside the operation
+      ex : grad(a + b) -> self will be -> a + b
+    
+    operation: is lambda function that define the operation
+      it can be grad, laplace, curl, div or rot
+      ex : lambda x : x.grad()
+    
+    Given constants K and L, and functions a and b
+      apply OP(Ka + Lb)= K.OP(a) + L.OP(b) 
+    
+    return : the expression that will replace the operation Aka the parent of self
+  """
+  def linear_operator_decomposition(self, operation):
+    arr = self.expand()
+
+    mulFun = self.mulArrFun
+    addFun = self.addArrFun
+
+    addArr = []
+    for add in arr:
+      mulArrVar = [item for item in add if not isinstance(item.token, Constant)]
+      mulArrConst = [item for item in add if isinstance(item.token, Constant)]
+      if len(mulArrVar) != 0 and len(mulArrConst) != 0:
+        addArr.append(mulFun(mulArrConst) * operation(mulFun(mulArrVar)))
+      elif len(mulArrVar) != 0:
+        addArr.append(operation(mulFun(mulArrVar)))
+      elif len(mulArrConst) != 0:
+        if len(mulArrConst) > 1:
+          addArr.append(mulFun(mulArrConst[1:]) * operation(mulArrConst[0]))
+        else:
+          addArr.append(operation(mulArrConst[0]))
+    return addFun(addArr)
+
+  """
+    self : is the content inside the operation
+      ex : grad(a . b) -> self will be -> a . b
+    
+    self expected to be only in a product form
+
+    Given functions a and b
+      apply grad(a.b) = a * grad(b) + b * grad(a) recursively
+    
+
+    return : the expression that will replace the operation Aka the parent of self
+  """
+  def gradient_product_rule(self):
+    arr = self.expand()[0]
+
+    def rule2_req(arr):
+      if len(arr) == 0:
+        raise RuntimeError("??")
+      if len(arr) == 1:
+        return arr[0].grad()
+      return arr[0] * rule2_req(arr[1:]) + self.mulArrFun(arr[1:]) * arr[0].grad()
+
+    return rule2_req(arr)
+
+  """
+    self is an expression (Node)
+
+    apply gradient_product_rule to th 
+  """
+  def apply_gradient_product_rule(self):
+    arr = self.expand()
+    for add in arr:
+      for i, mul in enumerate(add):
+        if isinstance(mul.token, Operation) and mul.token.type == Operation.Grad:
+          add[i] = mul.left.gradient_product_rule()
+    return self.expand_tree(arr)
+
+  """
   
+  """
+  def decompose(self):
+    arr = self.expand()
+    operations = {
+      Operation.Grad : lambda x : x.grad(),
+      Operation.Laplace : lambda x : x.laplace(),
+      Operation.Div : lambda x : x.divergence(),
+    }
+    for add in arr:
+      for i, mul in enumerate(add):
+        allowed = [Operation.Grad, Operation.Laplace, Operation.Div]
+        if isinstance(mul.token, Operation) and mul.token.type in allowed:
+          target = mul.left
+          target = target.decompose()
+          expanded = target.linear_operator_decomposition(operations[mul.token.type])
+          if mul.token.type == Operation.Grad:
+            expanded = expanded.apply_gradient_product_rule()
+          add[i] = expanded
+    return self.expand_tree(arr)
+
   def getInfo(self, dim):
     res = EquationInfo()
     if dim == 1 or dim == 2:
@@ -128,11 +235,6 @@ class Node():
             res.variables.add(mul.left)
     return res
 
-  """
-    Return a simplified expression without factorization.
-  """
-  def reduce(self, dim):
-    return simplify_tree(self, dim)
 
   """
    - if x = 1 or self.token = 1 constant, just return the node Ex: 1 * a = a, a * 1 = a, 1 * 1 = 1
@@ -144,33 +246,7 @@ class Node():
   def __mul__(self, x):
     if not isinstance(x, Node):
       x = Node(x)
-    if isinstance(x.token, Constant) and x.token.value == 1:
-      return self
-    if isinstance(self.token, Constant) and self.token.value == 1:
-      return x
     
-    #####
-    var1 = self
-    if isinstance(self.token, Operation):
-      var1 = self.left
-    var2 = x
-    if isinstance(x.token, Operation):
-      var2 = x.left
-    if var1 != var2 and isinstance(var1, Variable) and isinstance(var2, isinstance(var1, Variable)):
-      raise RuntimeError("multiplication of different variables")
-    
-    ######
-    if isinstance(self.token, Operation) and isinstance(x.token, Operation):
-      not_allowed = [Operation.Dx, Operation.Dy, Operation.Dz, Operation.Dt]
-      if self.token.type in not_allowed or x.token.type in not_allowed:
-        raise RuntimeError("can't do multiplication between partial operations")
-    
-    #####
-    if isinstance(self.token, Operation) and isinstance(x.token, Variable) or \
-      isinstance(self.token, Variable) and isinstance(x.token, Operation) or \
-      isinstance(self.token, Variable) and isinstance(x.token, Variable):
-      raise RuntimeError("can't do multiplication between variables or operation of variable")
-
     res = Node(Operation(Operation.Mul))
     res.left = self
     res.right = x
@@ -191,6 +267,21 @@ class Node():
   def __radd__(self, x):
     x = Node(x)
     return x + self
+
+  def __eq__(self, other):
+    if not isinstance(other, Node):
+      raise RuntimeError("type error")
+    if type(self.token) == type(other.token):
+      if isinstance(self.token, Operation):
+        if (self.token.type in [Operation.Add, Operation.Mul]) and self.token.type == other.token.type:
+          return (self.left == other.left and self.right == other.right) or \
+            (self.left == other.right and self.right == other.left)
+        elif self.token.type == other.token.type:
+          return self.left == other.left
+      else:
+        return self.token == other.token
+    return False
+   
 
   # region Printing
     ##########################################
@@ -223,7 +314,7 @@ class Node():
   
   def __print_tree(self, tree_height : int):
     level_item = tree_height
-    item_len = 3
+    item_len = 2
     buffer_size = pow(2, level_item) * item_len
 
     level = 1
@@ -281,6 +372,26 @@ class Node():
     h = self.tree_height(self) + 1
     self.__print_tree(h)
   
+  @staticmethod
+  def mulArrFun(arr):
+    if len(arr) == 0:
+      return None
+    else:
+      res = arr[0]
+      for item in arr[1:]:
+        res = res * item
+      return res
+
+  @staticmethod
+  def addArrFun(arr):
+    if len(arr) == 0:
+      return None
+    else:
+      res = arr[0]
+      for item in arr[1:]:
+        res = res + item
+      return res
+
   def __str__(self):
     return str(self.token)
   

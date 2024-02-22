@@ -1,7 +1,7 @@
 from Symbol import Symbol
 
 class Equation():
-  def __init__(self, expr : Symbol, dim, reduce = True):
+  def __init__(self, expr : Symbol, dim):
     if not isinstance(expr, Symbol):
       raise TypeError("expr must be of type Symbol")
     if dim != 1 and dim != 2:
@@ -9,6 +9,4 @@ class Equation():
     self.dim = dim
     self.expr = expr
 
-    if reduce == True:
-      self.expr = self.expr.reduce(self.dim)
     self.info = self.expr.getInfo(dim = self.dim)

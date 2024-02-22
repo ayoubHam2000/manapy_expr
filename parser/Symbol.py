@@ -2,10 +2,13 @@ from Node import Node
 import re
 
 class Symbol():
-  symbolsDic = {}
+  Variable = 0
+  Constant = 1
+
+  arrDic = [{}, {}] #Variable Constant
 
   @staticmethod
-  def symbols(s : str):
+  def symbols(s : str, sb_type : int):
     res = []
     pattern = r'^[a-zA-Z ]*$'
     valid = bool(re.match(pattern, s))
@@ -13,30 +16,38 @@ class Symbol():
       raise RuntimeError("invalid input")
     tokens = s.split(' ')
     for t in tokens:
-      if t not in Symbol.symbolsDic:
-        Symbol.symbolsDic[t] = Symbol(t).node
-      v = Symbol(Symbol.symbolsDic[t])
-      res.append(v)
+      res.append(Symbol(t, sb_type))
     return tuple(res)
 
-  def __init__(self, value, name : str = None):
-    if not (isinstance(value, (str, int, float, Node))):
-      raise TypeError("Type error expect str, int, or float")
-    if name != None and not isinstance(name, str):
-      raise TypeError("Type error name must be string")
+  def __init__(self, value, sb_type : int = None):
+    if isinstance(value, (float, int)):
+      value = str(round(value, 3))
+      sb_type = Symbol.Constant
+    if not isinstance(value, (Node, str)):
+      raise RuntimeError(f"Type Error ${type(value)}")
+    
     if isinstance(value, Node):
       self.node = value
-    else:
-      if isinstance(value, str) and value in Symbol.symbolsDic:
-        self.node = Symbol.symbolsDic[value]
+    if isinstance(value, str):
+      if sb_type not in [Symbol.Constant, Symbol.Variable]:
+        raise RuntimeError("Invalid sb_type value") 
+      symbolsDic = Symbol.arrDic[sb_type]
+      if value in symbolsDic:
+        self.node = symbolsDic[value]
       else:
-        self.node = Node(value, name)
+        is_constant = (sb_type == Symbol.Constant)
+        self.node = Node(value, is_constant)
+        symbolsDic[value] = self.node
+    
   
   def laplace(self):
     return Symbol(self.node.laplace())
 
   def grad(self):
     return Symbol(self.node.grad())
+  
+  def divergence(self):
+    return Symbol(self.node.divergence())
 
   def dx(self):
     return Symbol(self.node.dx())
@@ -56,11 +67,14 @@ class Symbol():
   def exec(self):
     return self.node.exec()
   
-  def reduce(self, dim):
-    return Symbol(self.node.reduce(dim))
-  
+  def as_string(self):
+    return self.node.as_string()
+    
   def getInfo(self, dim):
     return self.node.getInfo(dim)
+  
+  def decompose(self):
+    return Symbol(self.node.decompose())
 
   def __mul__(self, x):
     if not isinstance(x, Symbol):
@@ -87,6 +101,13 @@ class Symbol():
   def __repr__(self):
     return str(self.node.token.name)
 
+  def __eq__(self, other):
+    if not isinstance(other, Symbol):
+      raise RuntimeError("type error")
+    return self.node == other.node
+############################
+### Functionalities
+############################
 
 def grad(s : Symbol):
   if not isinstance(s, Symbol):
@@ -97,6 +118,11 @@ def laplace(s : Symbol):
   if not isinstance(s, Symbol):
     s = Symbol(s)
   return s.laplace()
+
+def divergence(s : Symbol):
+  if not isinstance(s, Symbol):
+    s = Symbol(s)
+  return s.divergence()
 
 def dx(s : Symbol):
   if not isinstance(s, Symbol):
